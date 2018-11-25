@@ -33,11 +33,8 @@ import com.google.android.gms.tasks.Task;
 import com.google.firebase.analytics.FirebaseAnalytics;
 import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.database.DataSnapshot;
-import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.ValueEventListener;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
 
@@ -46,7 +43,6 @@ import java.io.FileWriter;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.Map;
 
 public class TrackerService extends Service implements LocationListener {
@@ -61,7 +57,6 @@ public class TrackerService extends Service implements LocationListener {
     private DatabaseReference mFirebaseTransportMovementRef;
     private DatabaseReference mFirebaseTransportMoveHistoryRef;
     private FirebaseRemoteConfig mFirebaseRemoteConfig;
-    private LinkedList<Map<String, Object>> mTransportStatuses = new LinkedList<>();
     private NotificationManager mNotificationManager;
     private NotificationCompat.Builder mNotificationBuilder;
     private PowerManager.WakeLock mWakelock;
@@ -152,7 +147,6 @@ public class TrackerService extends Service implements LocationListener {
                             editor.putString(getString(R.string.uid), task.getResult().getUser().getUid().toString());
                             editor.apply();
                             fetchRemoteConfig();
-                            // loadPreviousStatuses();
                             initiateTracking();
                         } else {
                             Toast.makeText(TrackerService.this, R.string.auth_failed,
@@ -178,35 +172,6 @@ public class TrackerService extends Service implements LocationListener {
                 });
     }
 
-    /**
-     * Loads previously stored statuses from Firebase, and once retrieved,
-     * start location tracking.
-     */
-    private void loadPreviousStatuses() {
-        String transportId = mPrefs.getString(getString(R.string.transport_id), "");
-        String uid = mPrefs.getString(getString(R.string.uid), "");
-        FirebaseAnalytics.getInstance(this).setUserProperty("transportID", transportId);
-        String path = getString(R.string.firebase_movement_path) + uid + "/" + transportId;
-        mFirebaseTransportMovementRef = FirebaseDatabase.getInstance().getReference(path);
-        mFirebaseTransportMovementRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                if (snapshot != null) {
-                    for (DataSnapshot transportStatus : snapshot.getChildren()) {
-                        mTransportStatuses.add(Integer.parseInt(transportStatus.getKey()),
-                                (Map<String, Object>) transportStatus.getValue());
-                    }
-                }
-                startLocationTracking();
-            }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                // TODO: Handle gracefully
-            }
-        });
-    }
-
     private void initiateTracking() {
         String transportId = mPrefs.getString(getString(R.string.transport_id), "");
         String uid = mPrefs.getString(getString(R.string.uid), "");
@@ -230,21 +195,12 @@ public class TrackerService extends Service implements LocationListener {
         mGoogleApiClient.connect();
     }
 
-    /**
-     * Determines if the current location is approximately the same as the location
-     * for a particular status. Used to check if we'll add a new status, or
-     * update the most recent status of we're stationary.
-     */
-    private boolean locationIsAtStatus(Location location, int statusIndex) {
-        if (mTransportStatuses.size() <= statusIndex) {
-            return false;
-        }
-        Map<String, Object> status = mTransportStatuses.get(statusIndex);
+    private boolean locationIsAtStatus(Location location) {
+        Map<String, Object> status = null;
         Location locationForStatus = new Location("");
         locationForStatus.setLatitude((double) status.get("lat"));
         locationForStatus.setLongitude((double) status.get("lng"));
         float distance = location.distanceTo(locationForStatus);
-        Log.d(TAG, String.format("Distance from status %s is %sm", statusIndex, distance));
         return distance < mFirebaseRemoteConfig.getLong("LOCATION_MIN_DISTANCE_CHANGED");
     }
 
@@ -294,8 +250,9 @@ public class TrackerService extends Service implements LocationListener {
      */
     @Override
     public void onLocationChanged(Location location) {
-
         fetchRemoteConfig();
+
+        Toast.makeText(getApplicationContext(), String.valueOf(location.getAccuracy()), Toast.LENGTH_SHORT).show();
 
         long hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         int startupSeconds = (int) (mFirebaseRemoteConfig.getDouble("SLEEP_HOURS_DURATION") * 3600);
@@ -312,29 +269,15 @@ public class TrackerService extends Service implements LocationListener {
         transportStatus.put("bearing", location.getBearing());
         transportStatus.put("speed", location.getSpeed());
 
-       /* if (locationIsAtStatus(location, 1) && locationIsAtStatus(location, 0)) {
-            // If the most recent two statuses are approximately at the same
-            // location as the new current location, rather than adding the new
-            // location, we update the latest status with the current. Two statuses
-            // are kept when the locations are the same, the earlier representing
-            // the time the location was arrived at, and the latest representing the
-            // current time.
-            mTransportStatuses.set(0, transportStatus);
-            // Only need to update 0th status, so we can save bandwidth.
-            mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
-        } else {
-            // Maintain a fixed number of previous statuses.
-            while (mTransportStatuses.size() >= mFirebaseRemoteConfig.getLong("MAX_STATUSES")) {
-                mTransportStatuses.removeLast();
+        if (location.hasAccuracy()) {
+            if (location.getAccuracy() <= 20.0f) {
+                mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
+                mFirebaseTransportMoveHistoryRef.push().setValue(transportStatus);
             }
-            mTransportStatuses.addFirst(transportStatus);
-            // We push the entire list at once since each key/index changes, to
-            // minimize network requests.
-            mFirebaseTransportMovementRef.setValue(mTransportStatuses);
-        }*/
-
-        mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
-        mFirebaseTransportMoveHistoryRef.push().setValue(transportStatus);
+        } else {
+            mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
+            mFirebaseTransportMoveHistoryRef.push().setValue(transportStatus);
+        }
 
         if (BuildConfig.DEBUG) {
             logStatusToStorage(transportStatus);
