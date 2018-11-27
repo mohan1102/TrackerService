@@ -44,6 +44,7 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 public class TrackerService extends Service implements LocationListener {
 
@@ -52,6 +53,7 @@ public class TrackerService extends Service implements LocationListener {
     private static final int NOTIFICATION_ID = 1;
     private static final int FOREGROUND_SERVICE_ID = 1;
     private static final int CONFIG_CACHE_EXPIRY = 600;  // 10 minutes.
+    private static long parkingStart = 0;
 
     private GoogleApiClient mGoogleApiClient;
     private DatabaseReference mFirebaseTransportMovementRef;
@@ -252,7 +254,8 @@ public class TrackerService extends Service implements LocationListener {
     public void onLocationChanged(Location location) {
         fetchRemoteConfig();
 
-        Toast.makeText(getApplicationContext(), String.valueOf(location.getAccuracy()), Toast.LENGTH_SHORT).show();
+        Toast.makeText(getApplicationContext(), "Acc :" + String.valueOf(location.getAccuracy()) +
+                " Speed :" + location.getSpeed(), Toast.LENGTH_SHORT).show();
 
         long hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         int startupSeconds = (int) (mFirebaseRemoteConfig.getDouble("SLEEP_HOURS_DURATION") * 3600);
@@ -271,6 +274,22 @@ public class TrackerService extends Service implements LocationListener {
 
         if (location.hasAccuracy()) {
             if (location.getAccuracy() <= 20.0f) {
+                // Calculate Motion
+                if (location.getSpeed() < 10) {
+                    transportStatus.put("motion", "IDLE");
+                    if (parkingStart == 0) {
+                        parkingStart = location.getTime();
+                    } else {
+                        long duration = TimeUnit.MILLISECONDS.toMinutes(location.getTime() - parkingStart);
+                        if (duration >= 5) {
+                            transportStatus.put("motion", "PARKED");
+                        }
+                    }
+                } else {
+                    parkingStart = 0;
+                    transportStatus.put("motion", "RUNNING");
+                }
+
                 mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
                 mFirebaseTransportMoveHistoryRef.push().setValue(transportStatus);
             }
