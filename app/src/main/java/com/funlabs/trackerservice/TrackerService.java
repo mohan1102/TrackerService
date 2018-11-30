@@ -44,7 +44,6 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 public class TrackerService extends Service implements LocationListener {
 
@@ -53,7 +52,9 @@ public class TrackerService extends Service implements LocationListener {
     private static final int NOTIFICATION_ID = 1;
     private static final int FOREGROUND_SERVICE_ID = 1;
     private static final int CONFIG_CACHE_EXPIRY = 600;  // 10 minutes.
-    private static long parkingStart = 0;
+    private static double previousLat = 0.0;
+    private static double previousLng = 0.0;
+    private static long previousTime = 0;
 
     private GoogleApiClient mGoogleApiClient;
     private DatabaseReference mFirebaseTransportMovementRef;
@@ -175,6 +176,9 @@ public class TrackerService extends Service implements LocationListener {
     }
 
     private void initiateTracking() {
+        previousLat = 0.0;
+        previousLat = 0.0;
+        previousTime = 0;
         String transportId = mPrefs.getString(getString(R.string.transport_id), "");
         String uid = mPrefs.getString(getString(R.string.uid), "");
         FirebaseAnalytics.getInstance(this).setUserProperty("transportID", transportId);
@@ -197,13 +201,12 @@ public class TrackerService extends Service implements LocationListener {
         mGoogleApiClient.connect();
     }
 
-    private boolean locationIsAtStatus(Location location) {
-        Map<String, Object> status = null;
+    private float distanceTo(Location location) {
         Location locationForStatus = new Location("");
-        locationForStatus.setLatitude((double) status.get("lat"));
-        locationForStatus.setLongitude((double) status.get("lng"));
+        locationForStatus.setLatitude(previousLat);
+        locationForStatus.setLongitude(previousLng);
         float distance = location.distanceTo(locationForStatus);
-        return distance < mFirebaseRemoteConfig.getLong("LOCATION_MIN_DISTANCE_CHANGED");
+        return distance;
     }
 
     private float getBatteryLevel() {
@@ -271,25 +274,38 @@ public class TrackerService extends Service implements LocationListener {
         transportStatus.put("power", getBatteryLevel());
         transportStatus.put("bearing", location.getBearing());
         transportStatus.put("speed", location.getSpeed());
+        transportStatus.put("calspeed", 0);
+        transportStatus.put("distance", 0);
+
+        float distance = 0.0f;
+        double speed_kph = 0;
+        if (previousLat != 0.0 && previousLng != 0.0 && previousTime != 0) {
+            distance = distanceTo(location);
+            if (distance < 500) { // 500 meter
+                double time_s = (location.getTime() - previousTime) / 1000.0;
+                double speed_mps = distance / time_s;
+                speed_kph = (speed_mps * 3600.0) / 1000.0;
+                transportStatus.put("calspeed", speed_kph);
+                transportStatus.put("distance", distance);
+            }
+            Toast.makeText(getApplicationContext(), "Dis :" + String.valueOf(distance) +
+                    " Speed Calc:" + speed_kph, Toast.LENGTH_SHORT).show();
+        }
+        previousTime = location.getTime();
+        previousLat = location.getLatitude();
+        previousLng = location.getLongitude();
 
         if (location.hasAccuracy()) {
             if (location.getAccuracy() <= 20.0f) {
-                // Calculate Motion
-                if (location.getSpeed() < 10) {
-                    transportStatus.put("motion", "IDLE");
-                    if (parkingStart == 0) {
-                        parkingStart = location.getTime();
-                    } else {
-                        long duration = TimeUnit.MILLISECONDS.toMinutes(location.getTime() - parkingStart);
-                        if (duration >= 5) {
-                            transportStatus.put("motion", "PARKED");
-                        }
-                    }
-                } else {
-                    parkingStart = 0;
-                    transportStatus.put("motion", "RUNNING");
-                }
 
+                if (distance >= 20.0 && speed_kph > 10) {
+                    transportStatus.put("motion", "RUNNING");
+
+                } else {
+                    if (speed_kph <= 10) {
+                        transportStatus.put("motion", "PARKED");
+                    }
+                }
                 mFirebaseTransportMovementRef.child("0").setValue(transportStatus);
                 mFirebaseTransportMoveHistoryRef.push().setValue(transportStatus);
             }
