@@ -288,8 +288,11 @@ public class TrackerService extends Service implements LocationListener {
                 transportStatus.put("calspeed", speed_kph);
                 transportStatus.put("distance", distance);
             }
+            if (location.getBearing() <= 0) {
+                transportStatus.put("bearing", bearing(location));
+            }
             Toast.makeText(getApplicationContext(), "Dis :" + String.valueOf(distance) +
-                    " Speed Calc:" + speed_kph, Toast.LENGTH_SHORT).show();
+                    " Speed Calc:" + speed_kph + " Bear: " + bearing(location), Toast.LENGTH_SHORT).show();
         }
         previousTime = location.getTime();
         previousLat = location.getLatitude();
@@ -352,4 +355,21 @@ public class TrackerService extends Service implements LocationListener {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent);
     }
 
+
+    private double bearing(Location location) {
+        double dLon = toRad(location.getLongitude() - previousLng);
+        double y = Math.sin(dLon) * Math.cos(this.toRad(location.getLatitude()));
+        double x = Math.cos(this.toRad(previousLat)) * Math.sin(this.toRad(location.getLatitude())) -
+                Math.sin(this.toRad(previousLat)) * Math.cos(this.toRad(location.getLatitude())) * Math.cos(dLon);
+        double brng = this.toDeg(Math.atan2(y, x));
+        return ((brng + 360) % 360);
+    }
+
+    private double toRad(double deg) {
+        return deg * Math.PI / 180;
+    }
+
+    private double toDeg(double rad) {
+        return rad * 180 / Math.PI;
+    }
 }
