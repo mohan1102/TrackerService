@@ -40,7 +40,6 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
 
 import java.io.File;
 import java.io.FileWriter;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -260,12 +259,12 @@ public class TrackerService extends Service implements LocationListener {
         Toast.makeText(getApplicationContext(), "Acc :" + String.valueOf(location.getAccuracy()) +
                 " Speed :" + location.getSpeed(), Toast.LENGTH_SHORT).show();
 
-        long hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+       /* long hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         int startupSeconds = (int) (mFirebaseRemoteConfig.getDouble("SLEEP_HOURS_DURATION") * 3600);
         if (hour == mFirebaseRemoteConfig.getLong("SLEEP_HOUR_OF_DAY")) {
             shutdownAndScheduleStartup(startupSeconds);
             return;
-        }
+        }*/
 
         Map<String, Object> transportStatus = new HashMap<>();
         transportStatus.put("lat", location.getLatitude());
@@ -302,6 +301,9 @@ public class TrackerService extends Service implements LocationListener {
             if (location.getAccuracy() <= 20.0f) {
 
                 if (distance >= 20.0 && speed_kph > 10) {
+                    if (speed_kph >= 120) {
+                        transportStatus.put("calspeed", 120);
+                    }
                     transportStatus.put("motion", "RUNNING");
 
                 } else {
